@@ -17,6 +17,7 @@ type Config struct {
 	Username   string `json:"username"`
 	Password   string `json:"password"`
 	TargetURL  string `json:"target_url"`
+	HostURL    string `json:"host_url"`
 	LoginURL   string `json:"login_url"`
 	CookieName string `json:"cookie_name"`
 	// Automatically Generated
@@ -40,6 +41,7 @@ const (
 	KeyFile    = "{{.KeyFile}}"
 	Salt       = "{{.Salt}}"
 	TargetURL  = "{{.TargetURL}}"
+	HostURL    = "{{.HostURL}}"
 	LoginURL   = "{{.LoginURL}}"
 	CookieName = "{{.CookieName}}"
 )

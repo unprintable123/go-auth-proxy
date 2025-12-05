@@ -1,9 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"net"
 	"net/http"
@@ -95,7 +95,8 @@ func computeToken(username string, password string, salt string) []byte {
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
-		// 1. Parse the form data
+		r.Body = http.MaxBytesReader(w, r.Body, 10<<10) // 10KB
+
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "Failed to parse form", http.StatusBadRequest)
 			return
@@ -104,7 +105,9 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
 
-		if !bytes.Equal(computeToken(username, password, Salt), Token) {
+		computed := computeToken(username, password, Salt)
+
+		if subtle.ConstantTimeCompare(computed, Token) != 1 {
 			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 			return
 		}
@@ -129,6 +132,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("X-Frame-Options", "DENY")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`
         <h1>Login Page</h1>
@@ -164,6 +168,11 @@ var acceptedIpRanges = []string{
 
 var allowedIPNets []*net.IPNet
 
+var LocalNetwork = net.IPNet{
+	IP:   net.IPv4(192, 168, 0, 0),
+	Mask: net.CIDRMask(16, 32),
+}
+
 func init() {
 	for _, cidr := range acceptedIpRanges {
 		_, ipNet, err := net.ParseCIDR(cidr)
@@ -177,7 +186,7 @@ func init() {
 func ipWhitelistMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := r.RemoteAddr
-		// println("Login attempt from IP:", ip)
+		// println("Login attempt from IP:", ip, r.Host)
 
 		host, _, err := net.SplitHostPort(ip)
 		if err != nil {
@@ -187,6 +196,11 @@ func ipWhitelistMiddleware(next http.Handler) http.Handler {
 		requestIP := net.ParseIP(host)
 		if requestIP == nil {
 			http.Error(w, "Invalid IP Address", http.StatusForbidden)
+			return
+		}
+
+		if r.Host != HostURL && !LocalNetwork.Contains(requestIP) {
+			http.Error(w, "Forbidden: Invalid Host Header", http.StatusForbidden)
 			return
 		}
 
