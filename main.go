@@ -147,6 +147,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 var acceptedIpRanges = []string{
+	// Cloudflare IPv4 Ranges
 	"173.245.48.0/20",
 	"103.21.244.0/22",
 	"103.22.200.0/22",
@@ -200,7 +201,7 @@ func ipWhitelistMiddleware(next http.Handler) http.Handler {
 		}
 
 		if r.Host != HostURL && !LocalNetwork.Contains(requestIP) {
-			http.Error(w, "Forbidden: Invalid Host Header", http.StatusForbidden)
+			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
 
@@ -213,7 +214,7 @@ func ipWhitelistMiddleware(next http.Handler) http.Handler {
 		}
 
 		if !isAllowed {
-			http.Error(w, "Forbidden: Access denied", http.StatusForbidden)
+			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
 

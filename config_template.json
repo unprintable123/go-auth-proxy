@@ -4,7 +4,7 @@
     "username": "",
     "password": "",
     "target_url": "http://localhost",
-    "host_url": "",
+    "host_url": "https://example.com",
     "login_url": "/login",
     "cookie_name": "auth_token"
 }
