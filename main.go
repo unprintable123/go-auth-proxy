@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -11,13 +15,15 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+var jwtSecret []byte
+
 type AuthClaims struct {
 	UserID string `json:"user_id"`
 	jwt.RegisteredClaims
 }
 
 func createToken(userID string) (string, error) {
-	expirationTime := time.Now().Add(24 * time.Hour)
+	expirationTime := time.Now().Add(time.Hour)
 	claims := &AuthClaims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -26,7 +32,7 @@ func createToken(userID string) (string, error) {
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(jwtSecret))
+	return token.SignedString(jwtSecret)
 }
 
 func validateToken(tokenString string) (*AuthClaims, error) {
@@ -35,7 +41,7 @@ func validateToken(tokenString string) (*AuthClaims, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")
 		}
-		return []byte(jwtSecret), nil
+		return jwtSecret, nil
 	})
 
 	if err != nil {
@@ -50,7 +56,7 @@ func validateToken(tokenString string) (*AuthClaims, error) {
 
 func authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == loginURL {
+		if r.URL.Path == LoginURL {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -63,7 +69,7 @@ func authMiddleware(next http.Handler) http.Handler {
 		}
 
 		if tokenString == "" {
-			cookie, e := r.Cookie(cookieName)
+			cookie, e := r.Cookie(CookieName)
 			if e == nil {
 				tokenString = cookie.Value
 			}
@@ -77,8 +83,14 @@ func authMiddleware(next http.Handler) http.Handler {
 			}
 		}
 
-		http.Redirect(w, r, loginURL, http.StatusFound)
+		http.Redirect(w, r, LoginURL, http.StatusFound)
 	})
+}
+
+func computeToken(username string, password string, salt string) []byte {
+	hash := sha256.New()
+	hash.Write([]byte(username + ":" + password + ":" + salt))
+	return hash.Sum(nil)
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
@@ -92,27 +104,25 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
 
-		if username != Username || password != Password {
+		if !bytes.Equal(computeToken(username, password, Salt), Token) {
 			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 			return
 		}
 
-		userID := username
-
-		tokenString, err := createToken(userID)
+		tokenString, err := createToken(username)
 		if err != nil {
 			http.Error(w, "Failed to create token", http.StatusInternalServerError)
 			return
 		}
 
 		http.SetCookie(w, &http.Cookie{
-			Name:     cookieName,
+			Name:     CookieName,
 			Value:    tokenString,
 			Path:     "/",
-			Expires:  time.Now().Add(24 * time.Hour),
+			Expires:  time.Now().Add(time.Hour),
 			HttpOnly: true,
 			Secure:   true,
-			SameSite: http.SameSiteLaxMode,
+			SameSite: http.SameSiteStrictMode,
 		})
 
 		http.Redirect(w, r, "/", http.StatusFound)
@@ -132,19 +142,88 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
     `))
 }
 
+var acceptedIpRanges = []string{
+	"173.245.48.0/20",
+	"103.21.244.0/22",
+	"103.22.200.0/22",
+	"103.31.4.0/22",
+	"141.101.64.0/18",
+	"108.162.192.0/18",
+	"190.93.240.0/20",
+	"188.114.96.0/20",
+	"197.234.240.0/22",
+	"198.41.128.0/17",
+	"162.158.0.0/15",
+	"104.16.0.0/13",
+	"104.24.0.0/14",
+	"172.64.0.0/13",
+	"131.0.72.0/22",
+	// Local Networks
+	"192.168.0.0/16",
+}
+
+var allowedIPNets []*net.IPNet
+
+func init() {
+	for _, cidr := range acceptedIpRanges {
+		_, ipNet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			panic("Invalid CIDR configuration: " + err.Error())
+		}
+		allowedIPNets = append(allowedIPNets, ipNet)
+	}
+}
+
+func ipWhitelistMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := r.RemoteAddr
+		// println("Login attempt from IP:", ip)
+
+		host, _, err := net.SplitHostPort(ip)
+		if err != nil {
+			host = ip
+		}
+
+		requestIP := net.ParseIP(host)
+		if requestIP == nil {
+			http.Error(w, "Invalid IP Address", http.StatusForbidden)
+			return
+		}
+
+		isAllowed := false
+		for _, ipNet := range allowedIPNets {
+			if ipNet.Contains(requestIP) {
+				isAllowed = true
+				break
+			}
+		}
+
+		if !isAllowed {
+			http.Error(w, "Forbidden: Access denied", http.StatusForbidden)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
-	target, _ := url.Parse(targetURL)
+	jwtSecret = make([]byte, 32)
+	rand.Read(jwtSecret)
+
+	target, _ := url.Parse(TargetURL)
 	proxy := httputil.NewSingleHostReverseProxy(target)
 
-	http.HandleFunc(loginURL, loginHandler)
+	mux := http.NewServeMux()
+	mux.Handle(LoginURL, http.HandlerFunc(loginHandler))
 
 	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		proxy.ServeHTTP(w, r)
 	})
 
 	authProxy := authMiddleware(proxyHandler)
+	mux.Handle("/", authProxy)
+	finalHandler := ipWhitelistMiddleware(mux)
 
-	http.Handle("/", authProxy)
-
-	http.ListenAndServeTLS("0.0.0.0:6853", certFile, keyFile, nil)
+	http.ListenAndServeTLS("0.0.0.0:6853", CertFile, KeyFile, finalHandler)
 }

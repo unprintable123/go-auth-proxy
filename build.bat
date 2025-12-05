@@ -1,3 +1,5 @@
+go run generator/main.go
+
 set GOOS=linux
 set GOARCH=mipsle
 set CGO_ENABLED=0

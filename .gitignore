@@ -1,3 +1,5 @@
 .vscode
 *.exe
 luci-proxy
+config.json
+config_compiled.go
