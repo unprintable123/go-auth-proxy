@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -63,16 +62,9 @@ func authMiddleware(next http.Handler) http.Handler {
 
 		var tokenString string
 
-		authHeader := r.Header.Get("Authorization")
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
-		}
-
-		if tokenString == "" {
-			cookie, e := r.Cookie(CookieName)
-			if e == nil {
-				tokenString = cookie.Value
-			}
+		cookie, e := r.Cookie(CookieName)
+		if e == nil {
+			tokenString = cookie.Value
 		}
 
 		if tokenString != "" {
