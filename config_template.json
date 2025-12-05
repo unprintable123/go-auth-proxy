@@ -1,0 +1,9 @@
+{
+    "cert_file": "",
+    "key_file": "",
+    "username": "",
+    "password": "",
+    "target_url": "http://localhost",
+    "login_url": "/login",
+    "cookie_name": "auth_token"
+}
